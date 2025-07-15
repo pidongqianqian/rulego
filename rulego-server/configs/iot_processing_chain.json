@@ -1,0 +1,266 @@
+{
+    "ruleChain": {
+        "id": "iot_processing_chain",
+        "name": "IoT Data Processing Chain",
+        "description": "Complete IoT data processing pipeline with MQTT input, JavaScript filtering/transformation, PostgreSQL storage, and RabbitMQ output",
+        "root": true,
+        "debugMode": false,
+        "configuration": {}
+    },
+    "metadata": {
+        "nodes": [
+            {
+                "id": "mqtt_input",
+                "type": "mqtt",
+                "name": "MQTT Input",
+                "debugMode": false,
+                "configuration": {
+                    "server": "d.osvlabs.com:32279",
+                    "username": "iot-kpndlt",
+                    "password": "hkpndlthJ",
+                    "topic": "/sensors/+/data",
+                    "qos": 1,
+                    "cleanSession": true,
+                    "clientID": "rulego_iot_processor"
+                },
+                "additionalInfo": {
+                    "description": "Receives IoT sensor data from MQTT broker",
+                    "layoutX": 100,
+                    "layoutY": 100
+                }
+            },
+            {
+                "id": "js_filter",
+                "type": "jsFilter",
+                "name": "Data Validation Filter",
+                "debugMode": false,
+                "configuration": {
+                    "jsScript": "// Validate IoT sensor data\nfunction Filter(msg, metadata, msgType) {\n  try {\n    // Parse JSON data\n    var data = JSON.parse(msg);\n    \n    // Validate required fields\n    if (!data.deviceId || !data.timestamp || !data.temperature || !data.humidity) {\n      return false;\n    }\n    \n    // Validate data types and ranges\n    if (typeof data.deviceId !== 'string' || data.deviceId.length === 0) {\n      return false;\n    }\n    \n    if (typeof data.temperature !== 'number' || data.temperature < -50 || data.temperature > 100) {\n      return false;\n    }\n    \n    if (typeof data.humidity !== 'number' || data.humidity < 0 || data.humidity > 100) {\n      return false;\n    }\n    \n    // Validate timestamp\n    var timestamp = new Date(data.timestamp);\n    if (isNaN(timestamp.getTime())) {\n      return false;\n    }\n    \n    // Set metadata for downstream processing\n    metadata.deviceId = data.deviceId;\n    metadata.timestamp = data.timestamp;\n    metadata.temperature = data.temperature;\n    metadata.humidity = data.humidity;\n    metadata.pressure = data.pressure || null;\n    \n    return true;\n  } catch (e) {\n    return false;\n  }\n}"
+                },
+                "additionalInfo": {
+                    "description": "Validates incoming sensor data format and ranges",
+                    "layoutX": 300,
+                    "layoutY": 100
+                }
+            },
+            {
+                "id": "js_transform",
+                "type": "jsTransform",
+                "name": "Data Transformation",
+                "debugMode": false,
+                "configuration": {
+                    "jsScript": "// Transform and enrich IoT sensor data\nfunction Transform(msg, metadata, msgType) {\n  try {\n    var data = JSON.parse(msg);\n    \n    // Convert temperature to Fahrenheit if needed\n    var tempF = (data.temperature * 9/5) + 32;\n    \n    // Calculate heat index if both temperature and humidity are available\n    var heatIndex = null;\n    if (data.temperature >= 26.7 && data.humidity >= 40) {\n      // Simplified heat index calculation\n      heatIndex = data.temperature + (0.5 * data.humidity);\n    }\n    \n    // Determine alert level based on thresholds\n    var alertLevel = 'normal';\n    if (data.temperature > 45 || data.humidity > 90) {\n      alertLevel = 'critical';\n    } else if (data.temperature > 35 || data.humidity > 80) {\n      alertLevel = 'warning';\n    }\n    \n    // Create enriched data object\n    var enrichedData = {\n      deviceId: data.deviceId,\n      timestamp: data.timestamp,\n      temperature: data.temperature,\n      temperatureF: tempF,\n      humidity: data.humidity,\n      pressure: data.pressure,\n      heatIndex: heatIndex,\n      alertLevel: alertLevel,\n      processedAt: new Date().toISOString(),\n      location: metadata.location || 'unknown'\n    };\n    \n    // Update metadata\n    metadata.alertLevel = alertLevel;\n    metadata.temperatureF = tempF;\n    metadata.heatIndex = heatIndex;\n    metadata.processedAt = enrichedData.processedAt;\n    \n    return {\n      msg: JSON.stringify(enrichedData),\n      metadata: metadata,\n      msgType: msgType\n    };\n  } catch (e) {\n    throw new Error('Data transformation failed: ' + e.message);\n  }\n}"
+                },
+                "additionalInfo": {
+                    "description": "Transforms raw sensor data and calculates derived values",
+                    "layoutX": 500,
+                    "layoutY": 100
+                }
+            },
+            {
+                "id": "fork_node",
+                "type": "fork",
+                "name": "Data Distribution",
+                "debugMode": false,
+                "configuration": {},
+                "additionalInfo": {
+                    "description": "Distributes processed data to multiple downstream processors",
+                    "layoutX": 700,
+                    "layoutY": 100
+                }
+            },
+            {
+                "id": "postgres_save",
+                "type": "dbClient",
+                "name": "PostgreSQL Storage",
+                "debugMode": false,
+                "configuration": {
+                    "driverName": "postgres",
+                    "dsn": "postgres://postgres:postgres@localhost:5432/rulego_test?sslmode=disable",
+                    "sql": "INSERT INTO sensor_data (device_id, temperature, temperature_f, humidity, pressure, heat_index, alert_level, timestamp, processed_at, location) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                    "params": [
+                        "${metadata.deviceId}",
+                        "${metadata.temperature}",
+                        "${metadata.temperatureF}",
+                        "${metadata.humidity}",
+                        "${metadata.pressure}",
+                        "${metadata.heatIndex}",
+                        "${metadata.alertLevel}",
+                        "${metadata.timestamp}",
+                        "${metadata.processedAt}",
+                        "${metadata.location}"
+                    ],
+                    "getOne": false
+                },
+                "additionalInfo": {
+                    "description": "Stores processed sensor data in PostgreSQL database",
+                    "layoutX": 900,
+                    "layoutY": 50
+                }
+            },
+            {
+                "id": "rabbitmq_publish",
+                "type": "restApiCall",
+                "name": "RabbitMQ Publisher",
+                "debugMode": false,
+                "configuration": {
+                    "restEndpointUrlPattern": "http://localhost:15672/api/exchanges/%2F/rulego_exchange/publish",
+                    "requestMethod": "POST",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "Authorization": "Basic Z3Vlc3Q6Z3Vlc3Q="
+                    },
+                    "body": "{\"properties\":{\"delivery_mode\":2,\"headers\":{\"deviceId\":\"${metadata.deviceId}\",\"alertLevel\":\"${metadata.alertLevel}\"}},\"routing_key\":\"sensors.data.${metadata.deviceId}\",\"payload\":\"${msg}\",\"payload_encoding\":\"string\"}",
+                    "readTimeoutMs": 5000,
+                    "insecureSkipVerify": true
+                },
+                "additionalInfo": {
+                    "description": "Publishes processed data to RabbitMQ via HTTP API",
+                    "layoutX": 900,
+                    "layoutY": 150
+                }
+            },
+            {
+                "id": "alert_filter",
+                "type": "jsFilter",
+                "name": "Alert Filter",
+                "debugMode": false,
+                "configuration": {
+                    "jsScript": "// Filter for alert conditions\nfunction Filter(msg, metadata, msgType) {\n  return metadata.alertLevel === 'warning' || metadata.alertLevel === 'critical';\n}"
+                },
+                "additionalInfo": {
+                    "description": "Filters messages that require alert notifications",
+                    "layoutX": 900,
+                    "layoutY": 250
+                }
+            },
+            {
+                "id": "alert_rabbitmq",
+                "type": "restApiCall",
+                "name": "Alert Publisher",
+                "debugMode": false,
+                "configuration": {
+                    "restEndpointUrlPattern": "http://localhost:15672/api/exchanges/%2F/rulego_alerts/publish",
+                    "requestMethod": "POST",
+                    "headers": {
+                        "Content-Type": "application/json",
+                        "Authorization": "Basic Z3Vlc3Q6Z3Vlc3Q="
+                    },
+                    "body": "{\"properties\":{\"delivery_mode\":2,\"headers\":{\"deviceId\":\"${metadata.deviceId}\",\"alertLevel\":\"${metadata.alertLevel}\",\"priority\":\"high\"}},\"routing_key\":\"alerts.${metadata.alertLevel}.${metadata.deviceId}\",\"payload\":\"${msg}\",\"payload_encoding\":\"string\"}",
+                    "readTimeoutMs": 5000,
+                    "insecureSkipVerify": true
+                },
+                "additionalInfo": {
+                    "description": "Publishes alert messages to RabbitMQ via HTTP API",
+                    "layoutX": 1100,
+                    "layoutY": 250
+                }
+            },
+            {
+                "id": "log_success",
+                "type": "jsLog",
+                "name": "Success Logger",
+                "debugMode": false,
+                "configuration": {
+                    "jsScript": "// Log successful processing\nfunction Log(msg, metadata, msgType) {\n  var data = JSON.parse(msg);\n  return 'SUCCESS: Processed data for device ' + data.deviceId + ' at ' + data.timestamp + ' with alert level: ' + data.alertLevel;\n}"
+                },
+                "additionalInfo": {
+                    "description": "Logs successful data processing",
+                    "layoutX": 1100,
+                    "layoutY": 50
+                }
+            },
+            {
+                "id": "log_error",
+                "type": "jsLog",
+                "name": "Error Logger",
+                "debugMode": false,
+                "configuration": {
+                    "jsScript": "// Log processing errors\nfunction Log(msg, metadata, msgType) {\n  return 'ERROR: Failed to process message - ' + msg + ' | Error: ' + (metadata.error || 'Unknown error');\n}"
+                },
+                "additionalInfo": {
+                    "description": "Logs processing errors for debugging",
+                    "layoutX": 500,
+                    "layoutY": 300
+                }
+            }
+        ],
+        "connections": [
+            {
+                "fromId": "mqtt_input",
+                "toId": "js_filter",
+                "type": "Success"
+            },
+            {
+                "fromId": "js_filter",
+                "toId": "js_transform",
+                "type": "True"
+            },
+            {
+                "fromId": "js_filter",
+                "toId": "log_error",
+                "type": "False"
+            },
+            {
+                "fromId": "js_transform",
+                "toId": "fork_node",
+                "type": "Success"
+            },
+            {
+                "fromId": "js_transform",
+                "toId": "log_error",
+                "type": "Failure"
+            },
+            {
+                "fromId": "fork_node",
+                "toId": "postgres_save",
+                "type": "Success"
+            },
+            {
+                "fromId": "fork_node",
+                "toId": "rabbitmq_publish",
+                "type": "Success"
+            },
+            {
+                "fromId": "fork_node",
+                "toId": "alert_filter",
+                "type": "Success"
+            },
+            {
+                "fromId": "postgres_save",
+                "toId": "log_success",
+                "type": "Success"
+            },
+            {
+                "fromId": "postgres_save",
+                "toId": "log_error",
+                "type": "Failure"
+            },
+            {
+                "fromId": "rabbitmq_publish",
+                "toId": "log_success",
+                "type": "Success"
+            },
+            {
+                "fromId": "rabbitmq_publish",
+                "toId": "log_error",
+                "type": "Failure"
+            },
+            {
+                "fromId": "alert_filter",
+                "toId": "alert_rabbitmq",
+                "type": "True"
+            },
+            {
+                "fromId": "alert_rabbitmq",
+                "toId": "log_success",
+                "type": "Success"
+            },
+            {
+                "fromId": "alert_rabbitmq",
+                "toId": "log_error",
+                "type": "Failure"
+            }
+        ]
+    }
+}
