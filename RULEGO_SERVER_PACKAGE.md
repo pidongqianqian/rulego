@@ -522,11 +522,17 @@ func Authentication() controller.Middleware {
 ### 1. 独立部署
 
 ```bash
-# 编译
-go build -o rulego-server cmd/server/main.go
+# 使用 Makefile 编译
+make build
+
+# 或者直接使用 go build
+go build -ldflags "-X 'main.Version=v1.0.0'" -o bin/rulego-server cmd/server/main.go
 
 # 运行
-./rulego-server --config configs/server.yaml
+./bin/rulego-server --config configs/config.yaml
+
+# 或者使用 Makefile
+make run-config
 ```
 
 ### 2. Docker部署

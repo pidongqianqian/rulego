@@ -1,0 +1,61 @@
+# RuleGo Server 配置文件
+
+# 服务器配置
+server:
+  name: "rulego-server"
+  port: 8080
+  version: "1.0.0"
+  host: "0.0.0.0"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+  max_header_mb: 1
+
+# 数据库配置
+database:
+  type: "file"
+  connection: "./data"
+  max_open_conns: 10
+  max_idle_conns: 5
+  max_lifetime: 1h
+  options: {}
+
+# 认证配置
+auth:
+  enabled: false
+  jwt_secret: "your-secret-key-change-this-in-production"
+  token_expiry: 24h
+  refresh_token: true
+  algorithm: "HS256"
+
+# 监控配置
+monitoring:
+  metrics_enabled: true
+  prometheus_endpoint: "/metrics"
+  health_endpoint: "/health"
+  pprof_enabled: false
+  pprof_endpoint: "/debug/pprof"
+
+# 日志配置
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+  filename: "logs/server.log"
+  max_size: 100
+  max_backups: 5
+  max_age: 30
+  compress: true
+
+# 组件配置
+components:
+  builtin:
+    - "filter"
+    - "transform"
+    - "action"
+  extensions: []
+
+# 插件配置
+plugins:
+  enabled: true
+  directory: "./plugins"
