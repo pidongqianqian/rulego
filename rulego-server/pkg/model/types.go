@@ -37,6 +37,38 @@ const (
 	RuleChainStatusDisabled RuleChainStatus = "disabled"
 )
 
+// RuleChainStatusInfo 规则链状态信息
+type RuleChainStatusInfo struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Status        RuleChainStatus        `json:"status"`
+	TotalMessages int64                  `json:"totalMessages"`
+	SuccessCount  int64                  `json:"successCount"`
+	FailedCount   int64                  `json:"failedCount"`
+	CurrentActive int64                  `json:"currentActive"`
+	SuccessRate   float64                `json:"successRate"`
+	Nodes         []NodeStatus           `json:"nodes"`
+	LastUpdated   time.Time              `json:"lastUpdated"`
+	Metadata      map[string]interface{} `json:"metadata"`
+}
+
+// NodeStatus 节点状态
+type NodeStatus struct {
+	ID       string                 `json:"id"`
+	Type     string                 `json:"type"`
+	Name     string                 `json:"name"`
+	Status   string                 `json:"status"`
+	Routes   []NodeRoute            `json:"routes"`
+	Parents  []string               `json:"parents"`
+	Metadata map[string]interface{} `json:"metadata"`
+}
+
+// NodeRoute 节点路由
+type NodeRoute struct {
+	ToID         string `json:"toId"`
+	RelationType string `json:"relationType"`
+}
+
 // CreateRuleChainRequest 创建规则链请求
 type CreateRuleChainRequest struct {
 	Name        string                 `json:"name" binding:"required"`

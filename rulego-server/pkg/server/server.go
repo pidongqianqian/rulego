@@ -12,6 +12,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rulego/rulego-server/pkg/config"
+	"github.com/rulego/rulego-server/pkg/controller"
+	"github.com/rulego/rulego-server/pkg/service"
 )
 
 // Server represents the HTTP server
@@ -42,6 +44,12 @@ func New(cfg *config.Config) *Server {
 
 // setupRoutes configures the HTTP routes
 func (s *Server) setupRoutes() {
+	// 创建服务实例
+	ruleService := service.NewRuleService()
+	
+	// 创建控制器实例
+	ruleController := controller.NewRuleController(ruleService)
+
 	// Health check endpoint
 	s.router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
@@ -53,7 +61,25 @@ func (s *Server) setupRoutes() {
 	// API v1 routes
 	v1 := s.router.Group("/api/v1")
 	{
-		// Rule management endpoints
+		// Rule chain management endpoints
+		v1.POST("/rule-chains", ruleController.CreateRuleChain)
+		v1.GET("/rule-chains", ruleController.ListRuleChains)
+		v1.GET("/rule-chains/:id", ruleController.GetRuleChain)
+		v1.PUT("/rule-chains/:id", ruleController.UpdateRuleChain)
+		v1.DELETE("/rule-chains/:id", ruleController.DeleteRuleChain)
+		
+		// Rule chain deployment endpoints
+		v1.POST("/rule-chains/:id/deploy", ruleController.DeployRuleChain)
+		v1.POST("/rule-chains/:id/undeploy", ruleController.UndeployRuleChain)
+		
+		// Rule chain execution endpoint
+		v1.POST("/rule-chains/:id/execute", ruleController.ExecuteRuleChain)
+		
+		// Rule chain status endpoints
+		v1.GET("/rule-chains/:id/status", ruleController.GetRuleChainStatus)
+		v1.GET("/rule-chains/:chainId/nodes/:nodeId/status", ruleController.GetNodeStatus)
+
+		// Legacy endpoints for backward compatibility
 		v1.POST("/rules", s.createRule)
 		v1.GET("/rules", s.listRules)
 		v1.GET("/rules/:id", s.getRule)
