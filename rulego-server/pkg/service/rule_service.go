@@ -9,7 +9,6 @@ import (
 
 	"github.com/rulego/rulego"
 	"github.com/rulego/rulego/api/types"
-	"github.com/rulego/rulego/engine"
 	"github.com/rulego/rulego-server/pkg/model"
 )
 
@@ -303,20 +302,28 @@ func (s *RuleServiceImpl) GetRuleChainStatus(ctx context.Context, chainId string
 	// 构建节点状态
 	var nodeStatuses []model.NodeStatus
 	if rootCtx != nil {
-		// 遍历所有节点
-		chainCtx := rootCtx.(*engine.RuleChainCtx)
-		for _, nodeId := range chainCtx.nodeIds {
-			node, exists := chainCtx.GetNodeById(nodeId)
-			if exists {
-				nodeStatus := model.NodeStatus{
-					ID:       nodeId.Id,
-					Type:     node.Type(),
-					Name:     node.GetNodeId().Id,
-					Status:   "active", // TODO: 实现更详细的状态检查
-					Metadata: make(map[string]interface{}),
+		for _, node := range definition.Metadata.Nodes {
+			// 获取路由和父节点
+			var routes []model.NodeRoute
+			var parentIds []string
+			for _, conn := range definition.Metadata.Connections {
+				if conn.FromId == node.Id {
+					routes = append(routes, model.NodeRoute{ToID: conn.ToId, RelationType: conn.Type})
 				}
-				nodeStatuses = append(nodeStatuses, nodeStatus)
+				if conn.ToId == node.Id {
+					parentIds = append(parentIds, conn.FromId)
+				}
 			}
+			nodeStatus := model.NodeStatus{
+				ID:       node.Id,
+				Type:     node.Type,
+				Name:     node.Name,
+				Status:   "active", // TODO: 实现更详细的状态检查
+				Routes:   routes,
+				Parents:  parentIds,
+				Metadata: make(map[string]interface{}),
+			}
+			nodeStatuses = append(nodeStatuses, nodeStatus)
 		}
 	}
 
@@ -348,39 +355,39 @@ func (s *RuleServiceImpl) GetNodeStatus(ctx context.Context, chainId string, nod
 		return nil, fmt.Errorf("root context not found")
 	}
 
-	chainCtx := rootCtx.(*engine.RuleChainCtx)
-	nodeIdStruct := types.RuleNodeId{Id: nodeId, Type: types.NODE}
-	node, exists := chainCtx.GetNodeById(nodeIdStruct)
-	if !exists {
+	definition := engine.Definition()
+	var nodeDef *types.RuleNode
+	for _, n := range definition.Metadata.Nodes {
+		if n.Id == nodeId {
+			nodeDef = n
+			break
+		}
+	}
+	if nodeDef == nil {
 		return nil, fmt.Errorf("node %s not found in chain %s", nodeId, chainId)
 	}
 
 	// 获取节点路由信息
-	routes, _ := chainCtx.GetNodeRoutes(nodeIdStruct)
-	parentIds, _ := chainCtx.GetParentNodeIds(nodeIdStruct)
+	var routes []model.NodeRoute
+	var parentIds []string
+	for _, conn := range definition.Metadata.Connections {
+		if conn.FromId == nodeId {
+			routes = append(routes, model.NodeRoute{ToID: conn.ToId, RelationType: conn.Type})
+		}
+		if conn.ToId == nodeId {
+			parentIds = append(parentIds, conn.FromId)
+		}
+	}
 
 	// 构建节点状态
 	nodeStatus := &model.NodeStatus{
 		ID:       nodeId,
-		Type:     node.Type(),
-		Name:     node.GetNodeId().Id,
+		Type:     nodeDef.Type,
+		Name:     nodeDef.Name,
 		Status:   "active", // TODO: 实现更详细的状态检查
-		Routes:   make([]model.NodeRoute, len(routes)),
-		Parents:  make([]string, len(parentIds)),
+		Routes:   routes,
+		Parents:  parentIds,
 		Metadata: make(map[string]interface{}),
-	}
-
-	// 转换父节点ID
-	for i, parentId := range parentIds {
-		nodeStatus.Parents[i] = parentId.Id
-	}
-
-	// 转换路由信息
-	for i, route := range routes {
-		nodeStatus.Routes[i] = model.NodeRoute{
-			ToID:         string(route.ToId),
-			RelationType: route.RelationType,
-		}
 	}
 
 	return nodeStatus, nil

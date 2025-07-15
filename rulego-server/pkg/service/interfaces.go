@@ -31,6 +31,12 @@ type RuleService interface {
 
 	// 获取规则链列表
 	ListRuleChains(ctx context.Context, req *model.ListRuleChainsRequest) (*model.ListRuleChainsResponse, error)
+
+	// 获取规则链状态
+	GetRuleChainStatus(ctx context.Context, chainId string) (*model.RuleChainStatusInfo, error)
+
+	// 获取节点状态
+	GetNodeStatus(ctx context.Context, chainId string, nodeId string) (*model.NodeStatus, error)
 }
 
 // ComponentService 组件管理服务接口
