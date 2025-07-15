@@ -2,13 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/rulego/rulego"
 	"github.com/rulego/rulego/api/types"
-	"github.com/rulego/rulego/api/types/metrics"
 	"github.com/rulego/rulego/engine"
 	"github.com/rulego/rulego-server/pkg/model"
 )
@@ -39,7 +39,12 @@ func (s *RuleServiceImpl) CreateRuleChain(ctx context.Context, req *model.Create
 	}
 
 	// 创建规则引擎
-	engine, err := s.ruleEnginePool.New(req.Name, []byte(req.Definition.RuleChain.String()))
+	dsl, err := json.Marshal(req.Definition)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal rule chain definition: %w", err)
+	}
+	
+	_, err = s.ruleEnginePool.New(req.Name, dsl)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create rule engine: %w", err)
 	}
@@ -122,7 +127,11 @@ func (s *RuleServiceImpl) UpdateRuleChain(ctx context.Context, chainId string, r
 	if req.Definition != nil {
 		engine, exists := s.ruleEnginePool.Get(chainId)
 		if exists {
-			err := engine.ReloadSelf([]byte(req.Definition.RuleChain.String()))
+			dsl, err := json.Marshal(req.Definition)
+			if err != nil {
+				return fmt.Errorf("failed to marshal rule chain definition: %w", err)
+			}
+			err = engine.ReloadSelf(dsl)
 			if err != nil {
 				return fmt.Errorf("failed to reload rule engine: %w", err)
 			}
@@ -209,12 +218,18 @@ func (s *RuleServiceImpl) ExecuteRuleChain(ctx context.Context, chainId string, 
 	engine.OnMsg(ruleMsg)
 	duration := time.Since(startTime)
 
+	// 转换元数据格式
+	metadata := make(map[string]interface{})
+	for k, v := range msg.Metadata {
+		metadata[k] = v
+	}
+
 	// 获取执行结果
 	result := &model.ExecuteResult{
 		Success:   true, // TODO: 根据实际执行结果判断
 		Message:   "Rule chain executed successfully",
 		Data:      msg.Data,
-		Metadata:  msg.Metadata,
+		Metadata:  metadata,
 		Duration:  duration,
 		TraceID:   msg.ID,
 		Timestamp: startTime,
@@ -289,13 +304,14 @@ func (s *RuleServiceImpl) GetRuleChainStatus(ctx context.Context, chainId string
 	var nodeStatuses []model.NodeStatus
 	if rootCtx != nil {
 		// 遍历所有节点
-		for _, nodeId := range rootCtx.(*engine.RuleChainCtx).nodeIds {
-			node, exists := rootCtx.(*engine.RuleChainCtx).GetNodeById(nodeId)
+		chainCtx := rootCtx.(*engine.RuleChainCtx)
+		for _, nodeId := range chainCtx.nodeIds {
+			node, exists := chainCtx.GetNodeById(nodeId)
 			if exists {
 				nodeStatus := model.NodeStatus{
-					ID:       string(nodeId),
+					ID:       nodeId.Id,
 					Type:     node.Type(),
-					Name:     node.GetNodeId(),
+					Name:     node.GetNodeId().Id,
 					Status:   "active", // TODO: 实现更详细的状态检查
 					Metadata: make(map[string]interface{}),
 				}
@@ -306,7 +322,7 @@ func (s *RuleServiceImpl) GetRuleChainStatus(ctx context.Context, chainId string
 
 	status := &model.RuleChainStatusInfo{
 		ID:            chainId,
-		Name:          definition.Name,
+		Name:          definition.RuleChain.Name, // 使用 RuleChain.Name
 		Status:        s.getEngineStatus(engine),
 		TotalMessages: metrics.Total,
 		SuccessCount:  metrics.Success,
@@ -332,24 +348,31 @@ func (s *RuleServiceImpl) GetNodeStatus(ctx context.Context, chainId string, nod
 		return nil, fmt.Errorf("root context not found")
 	}
 
-	node, exists := rootCtx.(*engine.RuleChainCtx).GetNodeById(types.RuleNodeId(nodeId))
+	chainCtx := rootCtx.(*engine.RuleChainCtx)
+	nodeIdStruct := types.RuleNodeId{Id: nodeId, Type: types.NODE}
+	node, exists := chainCtx.GetNodeById(nodeIdStruct)
 	if !exists {
 		return nil, fmt.Errorf("node %s not found in chain %s", nodeId, chainId)
 	}
 
 	// 获取节点路由信息
-	routes, _ := rootCtx.(*engine.RuleChainCtx).GetNodeRoutes(types.RuleNodeId(nodeId))
-	parentIds, _ := rootCtx.(*engine.RuleChainCtx).GetParentNodeIds(types.RuleNodeId(nodeId))
+	routes, _ := chainCtx.GetNodeRoutes(nodeIdStruct)
+	parentIds, _ := chainCtx.GetParentNodeIds(nodeIdStruct)
 
 	// 构建节点状态
 	nodeStatus := &model.NodeStatus{
 		ID:       nodeId,
 		Type:     node.Type(),
-		Name:     node.GetNodeId(),
+		Name:     node.GetNodeId().Id,
 		Status:   "active", // TODO: 实现更详细的状态检查
 		Routes:   make([]model.NodeRoute, len(routes)),
-		Parents:  parentIds,
+		Parents:  make([]string, len(parentIds)),
 		Metadata: make(map[string]interface{}),
+	}
+
+	// 转换父节点ID
+	for i, parentId := range parentIds {
+		nodeStatus.Parents[i] = parentId.Id
 	}
 
 	// 转换路由信息
